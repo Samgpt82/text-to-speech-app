@@ -7,6 +7,11 @@ import streamlit as st
 from openai import OpenAI
 from pydub import AudioSegment
 
+import shutil
+
+if not shutil.which("ffmpeg"):
+    st.warning("⚠️ FFmpeg is not installed. Audio processing may fail.")
+
 # -----------------------
 # Config
 # -----------------------
@@ -180,3 +185,4 @@ if generate:
 
     except Exception as e:
         st.error(f"Generation failed: {e}")
+
