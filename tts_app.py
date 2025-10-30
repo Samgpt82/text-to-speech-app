@@ -5,12 +5,6 @@ import uuid
 
 import streamlit as st
 from openai import OpenAI
-from pydub import AudioSegment
-
-import shutil
-
-if not shutil.which("ffmpeg"):
-    st.warning("⚠️ FFmpeg is not installed. Audio processing may fail.")
 
 # -----------------------
 # Config
@@ -74,6 +68,7 @@ def chunk_text(text: str, max_len: int = MAX_CHARS_PER_CHUNK) -> List[str]:
     return chunks
 
 def synthesize_chunk(client: OpenAI, model: str, voice: str, text: str, outfile: Path):
+    """Call OpenAI TTS for one chunk and write MP3 bytes to outfile."""
     resp = client.audio.speech.create(
         model=model,
         voice=voice,
@@ -81,16 +76,15 @@ def synthesize_chunk(client: OpenAI, model: str, voice: str, text: str, outfile:
     )
     outfile.write_bytes(resp.content)
 
-def stitch_mp3(parts: List[Path], out_file: Path):
-    """Concatenate mp3 parts into a single mp3 using pydub (ffmpeg required)."""
-    combined = None
-    for i, p in enumerate(parts):
-        seg = AudioSegment.from_file(p, format="mp3")
-        combined = seg if combined is None else combined + seg
-        # small crossfade/pause between chunks for natural flow (optional)
-        if i < len(parts) - 1:
-            combined += AudioSegment.silent(duration=200)  # 0.2s
-    combined.export(out_file, format="mp3")
+def concat_mp3(parts: List[Path], out_file: Path):
+    """
+    Concatenate MP3 files by raw byte appending.
+    Assumes all parts share the same codec/bitrate (true if they come from the same TTS call settings).
+    """
+    with open(out_file, "wb") as w:
+        for p in parts:
+            with open(p, "rb") as r:
+                w.write(r.read())
 
 # -----------------------
 # UI
@@ -105,6 +99,8 @@ with st.sidebar:
     voice = st.selectbox("Voice", ALLOWED_VOICES, index=ALLOWED_VOICES.index("alloy"))
     base_filename = st.text_input("Base file name", value="tts_output")
     keep_parts = st.checkbox("Keep chunk files", value=False, help="Save individual chunk mp3s for inspection")
+    stitch_output = st.checkbox("Combine chunks into one MP3", value=True,
+                                help="Disable to keep separate chunk files only (no merging).")
     st.markdown("---")
     st.markdown("**Tip**: Long text is auto-chunked so you can synthesize book chapters without hitting limits.")
 
@@ -156,27 +152,34 @@ if generate:
             part_files.append(part_path)
             prog.progress(i / len(chunks), text=f"Chunk {i}/{len(chunks)}")
 
-        # Stitch into a single file
-        final_out = OUTPUT_DIR / f"{base_filename}_{voice}_{session_id}.mp3"
-        stitch_mp3(part_files, final_out)
+        if stitch_output and len(part_files) > 1:
+            final_out = OUTPUT_DIR / f"{base_filename}_{voice}_{session_id}.mp3"
+            concat_mp3(part_files, final_out)
 
-        st.success("✅ Audio ready!")
-        st.audio(str(final_out))
-        with open(final_out, "rb") as f:
-            st.download_button(
-                label="⬇️ Download MP3",
-                data=f,
-                file_name=final_out.name,
-                mime="audio/mpeg"
-            )
-
-        if keep_parts:
-            st.write("Chunk files:")
-            for pf in part_files:
-                with open(pf, "rb") as f:
-                    st.download_button(f"Download {pf.name}", f, file_name=pf.name, mime="audio/mpeg")
+            st.success("✅ Audio ready!")
+            st.audio(str(final_out))
+            with open(final_out, "rb") as f:
+                st.download_button(
+                    label="⬇️ Download MP3",
+                    data=f,
+                    file_name=final_out.name,
+                    mime="audio/mpeg"
+                )
         else:
-            # Clean up chunk parts
+            # No stitching—offer individual chunk downloads and a simple playlist hint
+            st.success("✅ Chunks ready!")
+            for pf in part_files:
+                st.audio(str(pf))
+                with open(pf, "rb") as f:
+                    st.download_button(
+                        label=f"⬇️ Download {pf.name}",
+                        data=f,
+                        file_name=pf.name,
+                        mime="audio/mpeg",
+                    )
+
+        if not keep_parts and stitch_output:
+            # Clean up chunk parts after producing final file
             for pf in part_files:
                 try:
                     pf.unlink(missing_ok=True)
@@ -185,4 +188,3 @@ if generate:
 
     except Exception as e:
         st.error(f"Generation failed: {e}")
-
