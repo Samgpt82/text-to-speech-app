@@ -6,6 +6,22 @@ import uuid
 import streamlit as st
 from openai import OpenAI
 
+
+from flask import Flask, request, Response, jsonify
+from flask_cors import CORS
+
+app = Flask(__name__)
+
+# ✅ Allow GitHub Pages to call your API
+CORS(app, resources={
+    r"/tts": {
+        "origins": [
+            "https://samgpt82.github.io",
+            "https://samgpt82.github.io/website-demo",
+        ]
+    }
+})
+
 # -----------------------
 # Config
 # -----------------------
@@ -188,3 +204,4 @@ if generate:
 
     except Exception as e:
         st.error(f"Generation failed: {e}")
+
