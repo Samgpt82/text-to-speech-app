@@ -1,5 +1,7 @@
 Flask>=3.0
+flask-cors
 streamlit>=1.38
 openai>=1.40
+
 
 
